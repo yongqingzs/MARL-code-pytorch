@@ -29,7 +29,8 @@ if __name__ == '__main__':
         # actions = [None] * env.num_agents
         done_n = [False] * env.num_agents
         obs_n = env.reset()
-        while False in done_n:
+        # while False in done_n:
+        for _ in range(100):
             actions = runner.actions_by_models(obs_n)
             obs_n_, reward_n, done_n, info_n = env.step(actions)
             for i, done in enumerate(done_n):
@@ -37,4 +38,5 @@ if __name__ == '__main__':
                     actions[i] = None
             total_reward_n += np.array(reward_n)
             obs_n = obs_n_
+            env.render()
         print(total_reward_n)
