@@ -68,7 +68,7 @@ class MultiAgentEnv(gym.Env):
         self.world = world
         self.agents = self.world.policy_agents  # 意义和pettingzoo不一致
         # set required vectorized gym env property
-        self.n = len(world.policy_agents)
+        self.n = len(world.policy_agents)  # 改为num_agents，但未删除self.n 
         # scenario callbacks
         self.reset_callback = reset_callback
         self.reward_callback = reward_callback
@@ -126,6 +126,10 @@ class MultiAgentEnv(gym.Env):
         else:
             self.viewers = [None] * self.n
         self._reset_render()
+
+    @property
+    def num_agents(self):
+        return len(self.world.policy_agents)
 
     def step(self, action_n):
         """

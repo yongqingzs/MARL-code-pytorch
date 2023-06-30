@@ -2,13 +2,16 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import copy
-from algorithms.maddpg_matd3_mpe.networks import Actor,Critic_MATD3
+from algorithms.maddpg_matd3_mpe.networks import Actor, Critic_MATD3
 
 
 class MATD3(object):
     def __init__(self, args, agent_id):
         self.N = args.N
         self.agent_id = agent_id
+        # +
+        self.save_path = args.save_path
+        self.load_path = args.load_path
         self.max_action = args.max_action
         self.action_dim = args.action_dim_n[agent_id]
         self.lr_a = args.lr_a
@@ -83,5 +86,27 @@ class MATD3(object):
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-    def save_model(self, env_name, algorithm, number, total_steps, agent_id):
-        torch.save(self.actor.state_dict(), "./model/{}/{}_actor_number_{}_step_{}k_agent_{}.pth".format(env_name, algorithm, number, int(total_steps / 1000), agent_id))
+    def save_model(self):
+        """
+        save_path: './model/{algorithm}/{env_name}_{algorithm}'
+        path: save_path + '_{agent_id}.pkl'
+        """
+        torch.save(self.actor.state_dict(), self.save_path + '_{}.pkl'.format(self.agent_id))
+
+    def load_model(self):
+        """
+        使用模型时进行加载，
+        只加载actor_network，没有添加device
+
+        atr:
+        1. path: load_path + '_{agent_id}.pkl'
+        2. load_path: ?
+
+        NOTE:
+        1. 需要和actor序号相对应，而actor序号由外部输入path控制
+        2. TODO: 需要测试load_state_dict的效果
+        3. load_path不等于save_path
+        """
+        path = self.load_path + '_{}.pkl'.format(self.agent_id)
+        self.actor.load_state_dict(torch.load(path))
+        print('Agent {} successfully loaded actor_network'.format(self.agent_id))

@@ -1,1 +1,5 @@
 .idea
+**.npz
+**.pkl
+events.out.**
+__pycache__/

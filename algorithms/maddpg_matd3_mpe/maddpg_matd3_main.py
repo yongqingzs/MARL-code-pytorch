@@ -8,17 +8,21 @@ from algorithms.maddpg_matd3_mpe.maddpg import MADDPG
 from algorithms.maddpg_matd3_mpe.matd3 import MATD3
 import copy
 
+"""
+NOTE:
+1. 没有调用cuda，TODO: 需要添加device
+"""
 
 class Runner:
-    def __init__(self, args, number, seed):
+    def __init__(self, args, env, number=1, seed=0):
         self.args = args  # 为了以命令行使用
-        self.env_name = args.env_name  # +
-        self.number = number
+        self.number = number  # 应该是用作并行化训练
         self.seed = seed
         # Create env
-        self.env = make_env(self.env_name, discrete=False)  # Continuous action space
-        self.env_evaluate = make_env(self.env_name, discrete=False)  # 环境评估，单独创建环境
-        self.args.N = self.env.n  # The number of agents，TODO: 在mae中需要改为num_agents
+        self.env = env
+        self.env_evaluate = copy.deepcopy(env)  # TODO: 有效性有待测试
+        self.env_name = self.args.env_name  # +
+        self.args.N = self.env.num_agents  # The number of agents，TODO: 在mae中需要改为num_agents
         # 将每个agent的obs、action单独读入
         self.args.obs_dim_n = [self.env.observation_space[i].shape[0] for i in range(self.args.N)]  # obs dimensions of N agents
         self.args.action_dim_n = [self.env.action_space[i].shape[0] for i in range(self.args.N)]  # actions dimensions of N agents
@@ -27,27 +31,28 @@ class Runner:
         print("action_space=", self.env.action_space)
         print("action_dim_n={}".format(self.args.action_dim_n))
 
-        # Set random seed，TODO: 随机种子在模型评估的时候是否会有1影响
+        # Set random seed，TODO: 随机种子在模型评估的时候是否会有影响
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
 
         # Create N agents
         # 为每一个agent创建了一个MADDPG
         # TODO: 每一个agent都创建了一个中心critic?
-        if self.args.algorithm == "MADDPG":
+        if self.args.algorithm == "maddpg":
             print("Algorithm: MADDPG")
-            self.agent_n = [MADDPG(args, agent_id) for agent_id in range(args.N)]
-        elif self.args.algorithm == "MATD3":
+            self.agent_n = [MADDPG(args, agent_id) for agent_id in range(self.args.N)]
+        elif self.args.algorithm == "matd3":
             print("Algorithm: MATD3")
-            self.agent_n = [MATD3(args, agent_id) for agent_id in range(args.N)]
+            self.agent_n = [MATD3(args, agent_id) for agent_id in range(self.args.N)]
         else:
             print("Wrong!!!")
 
         self.replay_buffer = ReplayBuffer(self.args)  # 创建一个总体的经验回放池
 
         # Create a tensorboard
-        self.writer = SummaryWriter(log_dir='runs/{}/{}_env_{}_number_{}_seed_{}'.format(self.args.algorithm, self.args.algorithm, self.env_name, self.number, self.seed))
-
+        # elder: 'runs/{algorithm}/{algorithm}_env_{env_name}_number_{number}_seed_{seed}'
+        # new: 'tensorboard/{algorithm}/{env_name}_{algorithm}'
+        self.writer = SummaryWriter(log_dir=self.args.tensorboard_log)
         self.evaluate_rewards = []  # Record the rewards during the evaluating
         self.total_steps = 0  # agents循环完一次+1
 
@@ -121,11 +126,32 @@ class Runner:
         evaluate_reward = evaluate_reward / self.args.evaluate_times
         self.evaluate_rewards.append(evaluate_reward)
         print("total_steps:{} \t evaluate_reward:{} \t noise_std:{}".format(self.total_steps, evaluate_reward, self.noise_std))
+        # tensorboard
         self.writer.add_scalar('evaluate_step_rewards_{}'.format(self.env_name), evaluate_reward, global_step=self.total_steps)
-        # Save the rewards and models
-        np.save('./data_train/{}_env_{}_number_{}_seed_{}.npy'.format(self.args.algorithm, self.env_name, self.number, self.seed), np.array(self.evaluate_rewards))
+        # Save the rewards and models, save_path: ./model/{algorithm}/{env_name}_{algorithm}
+        np.savez(self.args.save_path + '.npz', np.array(self.evaluate_rewards))
         for agent_id in range(self.args.N):
-            self.agent_n[agent_id].save_model(self.env_name, self.args.algorithm, self.number, self.total_steps, agent_id)
+            self.agent_n[agent_id].save_model()
+    
+    def load_models(self, path=None):
+        """
+        该方法不能通过argparse使用，而是通过configs
+
+        atr:
+        1. load_path(default): './model/{algorithm}/{env_name}_{algorithm}'
+        """
+        if path is not None:
+            self.args.load_path = path
+        for agent_id in range(self.args.N):
+            self.agent_n[agent_id].load_model()
+
+    def actions_by_models(self, obs_n):
+        """
+        obs_n由外部输入
+        """
+        with torch.no_grad():
+            a_n = [agent.choose_action(obs, noise_std=0) for agent, obs in zip(self.agent_n, obs_n)] 
+        return a_n
 
 
 if __name__ == '__main__':
@@ -160,5 +186,6 @@ if __name__ == '__main__':
 
     env_names = ["simple_speaker_listener", "simple_spread"]
     env_index = 0
-    runner = Runner(args, env_name=env_names[env_index], number=1, seed=0)
+    env = make_env(env_names[env_index])
+    runner = Runner(args, env, number=1, seed=0)
     runner.run()
