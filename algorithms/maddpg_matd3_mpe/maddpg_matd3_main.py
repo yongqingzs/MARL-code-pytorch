@@ -11,6 +11,7 @@ import copy
 """
 NOTE:
 1. 没有调用cuda，TODO: 需要添加device
+2. args改为类调用
 """
 
 class Runner:
@@ -18,11 +19,13 @@ class Runner:
         self.args = args  # 为了以命令行使用
         self.number = number  # 应该是用作并行化训练
         self.seed = seed
+
         # Create env
+        # +
         self.env = env
         self.env_evaluate = copy.deepcopy(env)  # TODO: 有效性有待测试
-        self.env_name = self.args.env_name  # +
-        self.args.N = self.env.num_agents  # The number of agents，TODO: 在mae中需要改为num_agents
+        self.env_name = self.args.env_name
+        self.args.N = self.env.num_agents  # The number of agents
         # 将每个agent的obs、action单独读入
         self.args.obs_dim_n = [self.env.observation_space[i].shape[0] for i in range(self.args.N)]  # obs dimensions of N agents
         self.args.action_dim_n = [self.env.action_space[i].shape[0] for i in range(self.args.N)]  # actions dimensions of N agents
@@ -35,9 +38,7 @@ class Runner:
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
 
-        # Create N agents
-        # 为每一个agent创建了一个MADDPG
-        # TODO: 每一个agent都创建了一个中心critic?
+        # Create N agents，为每一个agent创建了一个MADDPG
         if self.args.algorithm == "maddpg":
             print("Algorithm: MADDPG")
             self.agent_n = [MADDPG(args, agent_id) for agent_id in range(self.args.N)]
@@ -49,14 +50,15 @@ class Runner:
 
         self.replay_buffer = ReplayBuffer(self.args)  # 创建一个总体的经验回放池
 
-        # Create a tensorboard
-        # elder: 'runs/{algorithm}/{algorithm}_env_{env_name}_number_{number}_seed_{seed}'
-        # new: 'tensorboard/{algorithm}/{env_name}_{algorithm}'
+        # Create a tensorboard, new: 'tensorboard/{algorithm}/{env_name}_{algorithm}'
         self.writer = SummaryWriter(log_dir=self.args.tensorboard_log)
         self.evaluate_rewards = []  # Record the rewards during the evaluating
         self.total_steps = 0  # agents循环完一次+1
 
         self.noise_std = self.args.noise_std_init  # Initialize noise_std
+
+        # + 
+        self.reward_array = []
 
     def run(self, ):
         """
@@ -92,12 +94,15 @@ class Runner:
                     for agent_id in range(self.args.N):
                         self.agent_n[agent_id].train(self.replay_buffer, self.agent_n)
 
-                # 总步数得到限定值后，进行策略评估
+                # 总步数达到限定值后，进行策略评估
                 if self.total_steps % self.args.evaluate_freq == 0:
                     self.evaluate_policy()
 
                 if all(done_n):
                     break
+            
+            # +
+            self.reward_array.append(r_n)
 
         self.env.close()
         self.env_evaluate.close()
@@ -123,16 +128,23 @@ class Runner:
                     break
             evaluate_reward += episode_reward
 
-        evaluate_reward = evaluate_reward / self.args.evaluate_times
-        self.evaluate_rewards.append(evaluate_reward)
+        # +
+        # TODO: evaluate_reward作为评价指标并不准确
+        # evaluate_reward = evaluate_reward / self.args.evaluate_times
+        # self.evaluate_rewards.append(evaluate_reward)
+
         print("total_steps:{} \t evaluate_reward:{} \t noise_std:{}".format(self.total_steps, evaluate_reward, self.noise_std))
         # tensorboard
         self.writer.add_scalar('evaluate_step_rewards_{}'.format(self.env_name), evaluate_reward, global_step=self.total_steps)
+        
         # Save the rewards and models, save_path: ./model/{algorithm}/{env_name}_{algorithm}
-        np.savez(self.args.save_path + '.npz', np.array(self.evaluate_rewards))
+        # np.savez(self.args.save_path + '.npz', np.array(self.evaluate_rewards))
+        np.savez(self.args.save_path + '.npz', np.array(self.reward_array))
+
         for agent_id in range(self.args.N):
             self.agent_n[agent_id].save_model()
     
+    # +
     def load_models(self, path=None):
         """
         该方法不能通过argparse使用，而是通过configs
@@ -145,6 +157,7 @@ class Runner:
         for agent_id in range(self.args.N):
             self.agent_n[agent_id].load_model()
 
+    # +
     def actions_by_models(self, obs_n):
         """
         obs_n由外部输入

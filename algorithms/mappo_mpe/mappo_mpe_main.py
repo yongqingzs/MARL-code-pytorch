@@ -1,28 +1,51 @@
 import torch
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
+from envs.mpe_from_openai.make_env import make_env  # mpe_from_openai为注释后的版本
 import argparse
-from normalization import Normalization, RewardScaling
-from replay_buffer import ReplayBuffer
-from mappo_mpe import MAPPO_MPE
-from make_env import make_env
+from algorithms.mappo_mpe.normalization import Normalization, RewardScaling
+from algorithms.mappo_mpe.replay_buffer import ReplayBuffer
+from algorithms.mappo_mpe.mappo_mpe import MAPPO_MPE
 
+"""
+Only for homogenous agents environments like Spread in MPE, 
+all agents have the same dimension of observation space and action space.
+Only for discrete action space.
 
-class Runner_MAPPO_MPE:
-    def __init__(self, args, env_name, number, seed):
+NOTE:
+1. 在maddpgs中并没有类似的obs限制，obs限制是因为这里的mappo实现只只有一个
+actor和critic
+2. 改造:
+- 添加save_path、load_path
+- load_path默认是save_path，但可以进行修改
+"""
+
+class Runner:
+    """
+    atr:
+    1. evalute_env: 和maddpgs不同，没有该atr
+    2. env.action_space:
+    - .n: 只有离散动作空间有
+    - .space[0]: 只有连续动作空间有
+    """
+    def __init__(self, args, env, number=1, seed=0):
         self.args = args
-        self.env_name = env_name
         self.number = number
         self.seed = seed
+
         # Set random seed
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
+
         # Create env
-        self.env = make_env(env_name, discrete=True) # Discrete action space
-        self.args.N = self.env.n  # The number of agents
+        self.env = env  # default: Discrete action space
+        self.env_name = self.args.env_name  # +
+        self.args.N = self.env.num_agents  # The number of agents
+        # obs_dim_n, action_dim_n并没有参与实际的训练中
         self.args.obs_dim_n = [self.env.observation_space[i].shape[0] for i in range(self.args.N)]  # obs dimensions of N agents
-        self.args.action_dim_n = [self.env.action_space[i].n for i in range(self.args.N)]  # actions dimensions of N agents
-        # Only for homogenous agents environments like Spread in MPE,all agents have the same dimension of observation space and action space
+        self.args.action_dim_n = [self.env.action_space[i].n for i in range(self.args.N)]  # actions dimensions of N agents, TODO: 将n改为shape[0]
+        
+        # Only for homogenous agents environments like Spread in MPE, all agents have the same dimension of observation space and action space
         self.args.obs_dim = self.args.obs_dim_n[0]  # The dimensions of an agent's observation space
         self.args.action_dim = self.args.action_dim_n[0]  # The dimensions of an agent's action space
         self.args.state_dim = np.sum(self.args.obs_dim_n)  # The dimensions of global state space（Sum of the dimensions of the local observation space of all agents）
@@ -31,15 +54,17 @@ class Runner_MAPPO_MPE:
         print("action_space=", self.env.action_space)
         print("action_dim_n={}".format(self.args.action_dim_n))
 
-        # Create N agents
+        # Create N agents，只有一个actor、critic
         self.agent_n = MAPPO_MPE(self.args)
         self.replay_buffer = ReplayBuffer(self.args)
 
         # Create a tensorboard
-        self.writer = SummaryWriter(log_dir='runs/MAPPO/MAPPO_env_{}_number_{}_seed_{}'.format(self.env_name, self.number, self.seed))
+        self.writer = SummaryWriter(log_dir=self.args.tensorboard_log)
 
         self.evaluate_rewards = []  # Record the rewards during the evaluating
         self.total_steps = 0
+
+        # Reward norm and scaling, TODO: 这一块还不是很清楚
         if self.args.use_reward_norm:
             print("------use reward norm------")
             self.reward_norm = Normalization(shape=self.args.N)
@@ -47,10 +72,18 @@ class Runner_MAPPO_MPE:
             print("------use reward scaling------")
             self.reward_scaling = RewardScaling(shape=self.args.N, gamma=self.args.gamma)
 
+        # + 
+        self.reward_array = []
+
     def run(self, ):
+        """
+        atr:
+        1. episode_steps: 完成一个episode的步数
+        2. batch_size: the number of episodes，区别于ppo中的batch_size
+        """
         evaluate_num = -1  # Record the number of evaluations
         while self.total_steps < self.args.max_train_steps:
-            if self.total_steps // self.args.evaluate_freq > evaluate_num:
+            if self.total_steps // self.args.evaluate_freq > evaluate_num:  # 只是为了evaluate_freq
                 self.evaluate_policy()  # Evaluate the policy every 'evaluate_freq' steps
                 evaluate_num += 1
 
@@ -74,18 +107,38 @@ class Runner_MAPPO_MPE:
         self.evaluate_rewards.append(evaluate_reward)
         print("total_steps:{} \t evaluate_reward:{}".format(self.total_steps, evaluate_reward))
         self.writer.add_scalar('evaluate_step_rewards_{}'.format(self.env_name), evaluate_reward, global_step=self.total_steps)
+        
         # Save the rewards and models
-        np.save('./data_train/MAPPO_env_{}_number_{}_seed_{}.npy'.format(self.env_name, self.number, self.seed), np.array(self.evaluate_rewards))
-        self.agent_n.save_model(self.env_name, self.number, self.seed, self.total_steps)
+        np.savez(self.args.save_path + '.npz', np.array(self.reward_array))
+        # np.save('./data_train/MAPPO_env_{}_number_{}_seed_{}.npy'.format(self.env_name, self.number, self.seed), np.array(self.evaluate_rewards))
+        self.agent_n.save_model()
 
     def run_episode_mpe(self, evaluate=False):
+        """
+        进行环境的运行和交互，但不涉及agents的更新
+
+        atr:
+        1. evaluate: 控制action的随机性，run: Flase，evaluate: True
+        2. episode_step: 指的是一个episode的steps
+        3. episode_limit: 因为mpe中没有done_callback，所以必须给episode加上限制
+        4. store_last_value: 区别于store_transition，增加episode_num += 1
+        - 在每个episode结束的时候，对def进行调用
+        - episode_num指的是记录的episode数目(但每次训练后会进行清空) -> 见run()
+        
+        NOTE:
+        1. 因为evaluate_policy同样要对def进行调用，
+        所以reward_array.append位置和maddpgs不相同
+        """
         episode_reward = 0
         obs_n = self.env.reset()
+
+        # Reward scaling and rnn
         if self.args.use_reward_scaling:
             self.reward_scaling.reset()
         if self.args.use_rnn:  # If use RNN, before the beginning of each episode，reset the rnn_hidden of the Q network.
             self.agent_n.actor.rnn_hidden = None
             self.agent_n.critic.rnn_hidden = None
+
         for episode_step in range(self.args.episode_limit):
             a_n, a_logprob_n = self.agent_n.choose_action(obs_n, evaluate=evaluate)  # Get actions and the corresponding log probabilities of N agents
             s = np.array(obs_n).flatten()  # In MPE, global state is the concatenation of all agents' local obs.
@@ -103,6 +156,7 @@ class Runner_MAPPO_MPE:
                 self.replay_buffer.store_transition(episode_step, obs_n, s, v_n, a_n, a_logprob_n, r_n, done_n)
 
             obs_n = obs_next_n
+
             if all(done_n):
                 break
 
@@ -111,8 +165,31 @@ class Runner_MAPPO_MPE:
             s = np.array(obs_n).flatten()
             v_n = self.agent_n.get_value(s)
             self.replay_buffer.store_last_value(episode_step + 1, v_n)
+            # +
+            self.reward_array.append(r_n)
 
         return episode_reward, episode_step + 1
+
+    # +
+    def load_models(self, path=None):
+        """
+        该方法不能通过argparse使用，而是通过configs
+
+        atr:
+        1. load_path(default): './model/{algorithm}/{env_name}_{algorithm}'
+        2. agent_n: 不同于maddpgs，消去了[agent_id]
+        """
+        if path is not None:
+            self.args.load_path = path
+        self.agent_n.load_model()
+
+    # +
+    def actions_by_models(self, obs_n):
+        """
+        obs_n由外部输入
+        """
+        a_n, _ = self.agent_n.choose_action(obs_n, evaluate=True)  # Get actions and the corresponding log probabilities of N agents
+        return a_n
 
 
 if __name__ == '__main__':
@@ -145,5 +222,6 @@ if __name__ == '__main__':
     parser.add_argument("--use_value_clip", type=float, default=False, help="Whether to use value clip.")
 
     args = parser.parse_args()
-    runner = Runner_MAPPO_MPE(args, env_name="simple_spread", number=1, seed=0)
+    env = make_env('spread')
+    runner = Runner(args, env, number=1, seed=0)
     runner.run()

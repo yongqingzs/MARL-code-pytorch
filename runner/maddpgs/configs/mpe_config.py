@@ -1,12 +1,12 @@
 class Args:
     def __init__(self, env_name, algorithm) -> None:
+        self.algorithm = algorithm  
         self.max_train_steps = int(1e6)
         self.episode_limit = 25
         self.evaluate_freq = 5000
         self.evaluate_times = 3
         self.max_action = 1.0
 
-        self.algorithm = algorithm  
         self.buffer_size = int(1e6)
         self.batch_size = 1024
         self.hidden_dim = 64

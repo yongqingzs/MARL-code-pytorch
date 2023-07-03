@@ -66,7 +66,7 @@ class Critic_RNN(nn.Module):
 class Actor_MLP(nn.Module):
     def __init__(self, args, actor_input_dim):
         super(Actor_MLP, self).__init__()
-        self.fc1 = nn.Linear(actor_input_dim, args.mlp_hidden_dim)
+        self.fc1 = nn.Linear(actor_input_dim, args.mlp_hidden_dim)  # obs_dim
         self.fc2 = nn.Linear(args.mlp_hidden_dim, args.mlp_hidden_dim)
         self.fc3 = nn.Linear(args.mlp_hidden_dim, args.action_dim)
         self.activate_func = [nn.Tanh(), nn.ReLU()][args.use_relu]
@@ -82,14 +82,14 @@ class Actor_MLP(nn.Module):
         # When 'train':         actor_input.shape=(mini_batch_size, episode_limit, N, actor_input_dim), prob.shape(mini_batch_size, episode_limit, N, action_dim)
         x = self.activate_func(self.fc1(actor_input))
         x = self.activate_func(self.fc2(x))
-        prob = torch.softmax(self.fc3(x), dim=-1)
+        prob = torch.softmax(self.fc3(x), dim=-1)  # 只针对离散动作空间
         return prob
 
 
 class Critic_MLP(nn.Module):
-    def __init__(self, args, critic_input_dim):
+    def __init__(self, args, critic_input_dim): 
         super(Critic_MLP, self).__init__()
-        self.fc1 = nn.Linear(critic_input_dim, args.mlp_hidden_dim)
+        self.fc1 = nn.Linear(critic_input_dim, args.mlp_hidden_dim)  # state_dim
         self.fc2 = nn.Linear(args.mlp_hidden_dim, args.mlp_hidden_dim)
         self.fc3 = nn.Linear(args.mlp_hidden_dim, 1)
         self.activate_func = [nn.Tanh(), nn.ReLU()][args.use_relu]
@@ -109,11 +109,20 @@ class Critic_MLP(nn.Module):
 
 
 class MAPPO_MPE:
+    """
+    atr:
+    1. actor_input_dim: obs_dim
+    1. critic_input_dim: state_dim
+    """
     def __init__(self, args):
         self.N = args.N
         self.action_dim = args.action_dim
-        self.obs_dim = args.obs_dim
-        self.state_dim = args.state_dim
+        # +
+        self.save_path = args.save_path
+        self.load_path = args.load_path
+
+        self.obs_dim = args.obs_dim  # 单个agent的obs_dim，同时一致
+        self.state_dim = args.state_dim  # agents的state_dim
         self.episode_limit = args.episode_limit
         self.rnn_hidden_dim = args.rnn_hidden_dim
 
@@ -137,7 +146,7 @@ class MAPPO_MPE:
         # get the input dimension of actor and critic
         self.actor_input_dim = args.obs_dim
         self.critic_input_dim = args.state_dim
-        if self.add_agent_id:
+        if self.add_agent_id:  # 并没有实现
             print("------add agent id------")
             self.actor_input_dim += args.N
             self.critic_input_dim += args.N
@@ -158,6 +167,10 @@ class MAPPO_MPE:
             self.ac_optimizer = torch.optim.Adam(self.ac_parameters, lr=self.lr)
 
     def choose_action(self, obs_n, evaluate):
+        """
+        将obs_n一起输入一个actor中，得到a_n(N,action_dim)，
+        a_n是根据不同的obs(from obs_n)得到
+        """
         with torch.no_grad():
             actor_inputs = []
             obs_n = torch.tensor(obs_n, dtype=torch.float32)  # obs_n.shape=(N，obs_dim)
@@ -185,6 +198,9 @@ class MAPPO_MPE:
                 return a_n.numpy(), a_logprob_n.numpy()
 
     def get_value(self, s):
+        """
+        将state(1, state_dim)复制N份，输入同一个critic，得到v_n(shape(N, 1))
+        """
         with torch.no_grad():
             critic_inputs = []
             # Because each agent has the same global state, we need to repeat the global state 'N' times.
@@ -197,6 +213,15 @@ class MAPPO_MPE:
             return v_n.numpy().flatten()
 
     def train(self, replay_buffer, total_steps):
+        """
+        atr:
+        1. lamda: GAE parameter
+        2. epsilon: GAE parameter X，ppo本身的系数
+        3. K_epochs: GAE parameter
+
+        NOTE:
+        1. 其更新方式和ppo没有本质区别，TODO: 需要进一步验证
+        """
         batch = replay_buffer.get_training_data()  # get training data
 
         # Calculate the advantage using GAE
@@ -210,7 +235,7 @@ class MAPPO_MPE:
             adv = torch.stack(adv, dim=1)  # adv.shape(batch_size,episode_limit,N)
             v_target = adv + batch['v_n'][:, :-1]  # v_target.shape(batch_size,episode_limit,N)
             if self.use_adv_norm:  # Trick 1: advantage normalization
-                adv = ((adv - adv.mean()) / (adv.std() + 1e-5))
+                adv = ((adv - adv.mean()) / (adv.std() + 1e-5))  # TODO: .std()是否需要dim
 
         """
             Get actor_inputs and critic_inputs
@@ -278,6 +303,9 @@ class MAPPO_MPE:
             p['lr'] = lr_now
 
     def get_inputs(self, batch):
+        """
+        从batch中提取actor_inputs、critic_inputs
+        """
         actor_inputs, critic_inputs = [], []
         actor_inputs.append(batch['obs_n'])
         critic_inputs.append(batch['s'].unsqueeze(2).repeat(1, 1, self.N, 1))
@@ -291,8 +319,13 @@ class MAPPO_MPE:
         critic_inputs = torch.cat([x for x in critic_inputs], dim=-1)  # critic_inputs.shape=(batch_size, episode_limit, N, critic_input_dim)
         return actor_inputs, critic_inputs
 
-    def save_model(self, env_name, number, seed, total_steps):
-        torch.save(self.actor.state_dict(), "./model/MAPPO_actor_env_{}_number_{}_seed_{}_step_{}k.pth".format(env_name, number, seed, int(total_steps / 1000)))
+    def save_model(self):
+        path = self.save_path + '.pkl'
+        torch.save(self.actor.state_dict(), path)
 
-    def load_model(self, env_name, number, seed, step):
-        self.actor.load_state_dict(torch.load("./model/MAPPO_actor_env_{}_number_{}_seed_{}_step_{}k.pth".format(env_name, number, seed, step)))
+    def load_model(self):
+        """
+        只加载actor
+        """
+        path = self.load_path + '.pkl'
+        self.actor.load_state_dict(torch.load(path))

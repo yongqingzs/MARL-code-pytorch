@@ -4,22 +4,28 @@ import numpy as np
 import os
 import sys
 os.chdir(sys.path[0])
-from algorithms.maddpg_matd3_mpe.maddpg_matd3_main import Runner
-from runner.maddpgs.configs.mpe_config import Args
+from algorithms.mappo_mpe.mappo_mpe_main import Runner
+from runner.mappo.configs.mpe_config import Args
 from envs.mpe_from_openai.make_env import make_env
 
-TRAIN_ID = 'n'
-MADDPG_ID = 'maddpg' 
-ENV_ID = 'simple_adversary'
+"""
+simple_spread、simple_adversary:
+1. action_space:
+- continuous: Box(2,)
+- discrete: Discrete(5,)
+"""
+
+TRAIN_ID = 'y'
+ENV_ID = 'simple_spread'  # simple_adversary
 
 if __name__ == '__main__':
-    args = Args(ENV_ID, MADDPG_ID)
-    env = make_env(ENV_ID)
+    args = Args(ENV_ID)
+    env = make_env(ENV_ID, discrete=True)  # 只针对离散动作空间
     
     if TRAIN_ID == 'y':
         # 改变参数
         args.max_train_steps = int(1e6)
-        # args.evaluate_freq = int(1e5)
+        args.evaluate_freq = int(1000)
         runner = Runner(args, env, number=1, seed=0)
         runner.run()
     elif TRAIN_ID == 'n':

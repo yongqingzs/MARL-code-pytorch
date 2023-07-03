@@ -12,6 +12,7 @@ class MADDPG(object):
         # +
         self.save_path = args.save_path
         self.load_path = args.load_path
+
         self.max_action = args.max_action  # 动作范围
         self.action_dim = args.action_dim_n[agent_id]  # 每个agent动作空间dim
         self.lr_a = args.lr_a  # Learning rate of actor
@@ -91,13 +92,16 @@ class MADDPG(object):
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
+    # +
     def save_model(self):
         """
         save_path: './model/{algorithm}/{env_name}_{algorithm}'
         path: save_path + '_{agent_id}.pkl'
         """
-        torch.save(self.actor.state_dict(), self.save_path + '_{}.pkl'.format(self.agent_id))
+        path = self.save_path + '_{}.pkl'.format(self.agent_id)
+        torch.save(self.actor.state_dict(), self.save_path + path)
 
+    # +
     def load_model(self):
         """
         使用模型时进行加载，

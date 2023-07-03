@@ -28,5 +28,5 @@ warnings.warn("This code base is no longer maintained, and is not expected to be
               "encourage researchers to switch to this maintained version for all purposes other than comparing "
               "to results run on this version of the environments. \n")
 
-if os.getenv('SUPPRESS_MA_PROMPT') != '1':
-    input("Please read the raised warning, then press Enter to continue... (to suppress this prompt, please set the environment variable `SUPPRESS_MA_PROMPT=1`)\n")
+# if os.getenv('SUPPRESS_MA_PROMPT') != '1':
+    # input("Please read the raised warning, then press Enter to continue... (to suppress this prompt, please set the environment variable `SUPPRESS_MA_PROMPT=1`)\n")
