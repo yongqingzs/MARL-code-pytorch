@@ -124,7 +124,8 @@ class Runner:
         4. store_last_value: 区别于store_transition，增加episode_num += 1
         - 在每个episode结束的时候，对def进行调用
         - episode_num指的是记录的episode数目(但每次训练后会进行清空) -> 见run()
-        
+        5. episode_reward: 只会添加r_n[0]
+
         NOTE:
         1. 因为evaluate_policy同样要对def进行调用，
         所以reward_array.append位置和maddpgs不相同

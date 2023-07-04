@@ -26,6 +26,7 @@ if __name__ == '__main__':
     # while False in done_n:
     for _ in range(25):
         actions = runner.actions_by_models(obs_n)
+        actions[1] = None
         obs_n_, reward_n, done_n, info_n = env.step(actions)
         for i, done in enumerate(done_n):
             if done is True:

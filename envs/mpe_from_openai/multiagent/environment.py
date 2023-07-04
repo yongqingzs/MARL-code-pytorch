@@ -55,6 +55,7 @@ class MultiAgentEnv(gym.Env):
 
     NOTE:
     1. 修改了discrete的输入，和MARL-code-pytorch一致
+    2. action不能为None
     """
 
     metadata = {

@@ -3,6 +3,14 @@ import torch
 
 
 class ReplayBuffer:
+    """
+    atr:
+    1. episode_num: 当前的episode数
+    2. episode_limit: args本身没有该属性，来自smac
+    3. episode_step: 由外部传入，代表当前episode的steps
+    4. max_episode_len: 实时记录，代表所有episodes出现的
+    最大步数
+    """
     def __init__(self, args):
         self.N = args.N
         self.obs_dim = args.obs_dim

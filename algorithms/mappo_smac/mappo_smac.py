@@ -82,6 +82,10 @@ class Actor_MLP(nn.Module):
             orthogonal_init(self.fc3, gain=0.01)
 
     def forward(self, actor_input, avail_a_n):
+        """
+        会对不允许的动作进行屏蔽，如果该动作不允许
+        (在smac中=0)，则使该动作的概率无限接近于0
+        """
         # When 'choose_action': actor_input.shape=(N, actor_input_dim), prob.shape=(N, action_dim)
         # When 'train':         actor_input.shape=(mini_batch_size, max_episode_len, N, actor_input_dim), prob.shape(mini_batch_size, max_episode_len, N, action_dim)
         x = self.activate_func(self.fc1(actor_input))
@@ -165,6 +169,11 @@ class MAPPO_SMAC:
             self.ac_optimizer = torch.optim.Adam(self.ac_parameters, lr=self.lr)
 
     def choose_action(self, obs_n, avail_a_n, evaluate):
+        """
+        atr:
+        1. avail_a_n: 允许的动作
+        - 每一位0代表不允许，1代表允许
+        """
         with torch.no_grad():
             actor_inputs = []
             obs_n = torch.tensor(obs_n, dtype=torch.float32)  # obs_n.shape=(N，obs_dim)
@@ -207,6 +216,10 @@ class MAPPO_SMAC:
             return v_n.numpy().flatten()
 
     def train(self, replay_buffer, total_steps):
+        """
+        atr:
+        1. max_episode_len: 代表所有episodes出现的最大步数
+        """
         batch = replay_buffer.get_training_data()  # Get training data
         max_episode_len = replay_buffer.max_episode_len
 

@@ -9,6 +9,13 @@ from smac.env import StarCraft2Env
 
 
 class Runner_MAPPO_SMAC:
+    """
+    atr:
+    1. episode_limit: 来自smac本身的步数限制
+    - smac达到episode_limit，同样会进行done，
+    所以这里对episode_limit的运用似乎和done重复
+    - args本身没有该属性
+    """
     def __init__(self, args, env_name, number, seed):
         self.args = args
         self.env_name = env_name
@@ -83,6 +90,26 @@ class Runner_MAPPO_SMAC:
         # self.agent_n.save_model(self.env_name, self.number, self.seed, self.total_steps)
 
     def run_episode_smac(self, evaluate=False):
+        """
+        atr:
+        1. replay_buffer.store_transition:
+        - episode_step: 这个episode所进行的步数
+        - episode_limit: args本身没有该属性，来自smac
+        2. dw: means dead or win
+        - 和done并不完全重合，因为done可能是dw，
+        也可能是超出回合数
+        - ! 该属性主要影响store_transition， 
+        'when reaching the max_episode_steps,there is a next state s' actually.'
+        3. win_tag: 只有win才为True
+        - 主要用来计算win_times，进而统计win_rate
+        4. avail_a_n: 动作的允许值，来自get_avail_actions
+
+        NOTE:
+        1. actions不会出现None，如果中途出现agent dead，则将
+        该agent对应的no op(不做动作)概率调为1
+        2. 在mpe中，如果agent出来的action调为None，那么在存储的
+        时候，会出现问题
+        """
         win_tag = False
         episode_reward = 0
         self.env.reset()
@@ -91,6 +118,7 @@ class Runner_MAPPO_SMAC:
         if self.args.use_rnn:  # If use RNN, before the beginning of each episode，reset the rnn_hidden
             self.agent_n.actor.rnn_hidden = None
             self.agent_n.critic.rnn_hidden = None
+
         for episode_step in range(self.args.episode_limit):
             obs_n = self.env.get_obs()  # obs_n.shape=(N,obs_dim)
             s = self.env.get_state()  # s.shape=(state_dim,)
@@ -110,6 +138,8 @@ class Runner_MAPPO_SMAC:
                     When dead or win or reaching the episode_limit, done will be Ture, we need to distinguish them;
                     dw means dead or win,there is no next state s';
                     but when reaching the max_episode_steps,there is a next state s' actually.
+
+                    TODO: 在mae中，都有next_state，但是，dw是否会对结果产生影响
                 """
                 if done and episode_step + 1 != self.args.episode_limit:
                     dw = True
