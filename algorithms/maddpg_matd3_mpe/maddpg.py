@@ -99,7 +99,7 @@ class MADDPG(object):
         path: save_path + '_{agent_id}.pkl'
         """
         path = self.save_path + '_{}.pkl'.format(self.agent_id)
-        torch.save(self.actor.state_dict(), self.save_path + path)
+        torch.save(self.actor.state_dict(), path)
 
     # +
     def load_model(self):

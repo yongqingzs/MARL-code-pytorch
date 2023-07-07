@@ -92,8 +92,9 @@ class MATD3(object):
         save_path: './model/{algorithm}/{env_name}_{algorithm}'
         path: save_path + '_{agent_id}.pkl'
         """
-        torch.save(self.actor.state_dict(), self.save_path + '_{}.pkl'.format(self.agent_id))
-
+        path = self.save_path + '_{}.pkl'.format(self.agent_id)
+        torch.save(self.actor.state_dict(), path)
+        
     # +
     def load_model(self):
         """
