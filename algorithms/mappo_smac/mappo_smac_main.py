@@ -15,6 +15,11 @@ class Runner_MAPPO_SMAC:
     - smac达到episode_limit，同样会进行done，
     所以这里对episode_limit的运用似乎和done重复
     - args本身没有该属性
+    2. args.N: 来自env_info["n_agents"]
+    - 似乎在训练过程中不会改变，因为该参数只有在init的时候才有输入
+    - 如果该参数不改变，那么buffer['active']将不会改变
+    3. buffer['active']: 仍然存活的agents
+    - 将直接影响算法更新
     """
     def __init__(self, args, env_name, number, seed):
         self.args = args
